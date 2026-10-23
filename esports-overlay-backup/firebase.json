@@ -1,0 +1,19 @@
+{
+  "hosting": {
+    "public": ".",
+    "cleanUrls": true,
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**",
+      "data/**",
+      "*.ps1",
+      "*.bat",
+      "*.md",
+      "server.js"
+    ],
+    "headers": [
+      { "source": "**", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
+    ]
+  }
+}

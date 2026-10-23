@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Project Backup</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body { margin: 0; background: #0d1016; color: #e8edf6; font: 15px/1.5 'Segoe UI', system-ui, sans-serif; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 36px 20px 60px; }
+  h1 { letter-spacing: 3px; font-size: 22px; margin: 0 0 6px; } p { color: #8392ab; }
+  button { background: #ffb21a; color: #0b0b0b; border: 0; border-radius: 8px; padding: 12px 22px; font: inherit; font-weight: 800; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: wait; } a { color: #ffb21a; }
+  #log { margin-top: 18px; background: #151a23; border: 1px solid #263044; border-radius: 10px; padding: 12px 16px; font: 13px/1.6 Consolas, monospace; max-height: 340px; overflow: auto; white-space: pre-wrap; }
+  .ok { color: #2ee6a6; } .bad { color: #ff5b6e; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>PROJECT BACKUP</h1>
+  <p>Packs every file of this project (exactly as it is now) <b>plus your saved settings</b> — teams, logos, colours, scores, cam assignments — into one ZIP you can keep before the redesign. Unzip it anywhere and run <code>start-server.bat</code> to get this version back.</p>
+  <button id="go">⬇ Full project + settings (ZIP)</button> &nbsp; <button id="site" style="background:#00f08c">⬇ Website, ready to publish (ZIP)</button> &nbsp; <a href="control.html">← Control panel</a>
+  <p style="font-size:13px">The <b>website</b> ZIP holds only what Firebase Hosting serves (pages, styles, scripts, <code>firebase.json</code>, <code>deploy-to-firebase.bat</code> and publish steps) — no saved data. The <b>full project</b> ZIP also has the sync server, NDI relay, scripts and your settings.</p>
+  <div id="log">Ready.</div>
+</div>
+<script>
+(function () {
+  'use strict';
+  const FILES = ['index.html', 'control.html', 'overlay.html', 'preview.html', 'assets.html', 'backup.html', 'README.md', 'firebase.json',
+    'css/overlay.css', 'css/control.css', 'js/core.js', 'js/scenes.js', 'js/overlay.js', 'js/control.js',
+    'server.ps1', 'server.js', 'ndi-relay.ps1', 'start-server.bat', 'start-ndi-relay.bat', 'allow-network.bat',
+    'spectator-hotkeys.ps1', 'spectator-hotkeys.bat', 'deploy-to-firebase.bat'];
+  const $ = (id) => document.getElementById(id), log = (m, c) => { const d = document.createElement('div'); if (c) d.className = c; d.textContent = m; $('log').appendChild(d); $('log').scrollTop = 1e9; };
+  const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  const crc32 = (b) => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+  function makeZip(files, when) {
+    const enc = new TextEncoder(), parts = [], central = []; let offset = 0;
+    const u16 = (v) => new Uint8Array([v & 255, v >> 8 & 255]), u32 = (v) => new Uint8Array([v & 255, v >> 8 & 255, v >> 16 & 255, v >>> 24 & 255]);
+    const cat = (...a) => { const n = a.reduce((s, x) => s + x.length, 0), out = new Uint8Array(n); let p = 0; a.forEach((x) => { out.set(x, p); p += x.length; }); return out; };
+    const time = (when.getHours() << 11) | (when.getMinutes() << 5) | (when.getSeconds() >> 1), date = ((when.getFullYear() - 1980) << 9) | ((when.getMonth() + 1) << 5) | when.getDate();
+    files.forEach((f) => {
+      const nm = enc.encode(f.name), crc = crc32(f.data);
+      const local = cat(u32(0x04034b50), u16(20), u16(0x0800), u16(0), u16(time), u16(date), u32(crc), u32(f.data.length), u32(f.data.length), u16(nm.length), u16(0), nm);
+      parts.push(local, f.data);
+      central.push(cat(u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0), u16(time), u16(date), u32(crc), u32(f.data.length), u32(f.data.length), u16(nm.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset), nm));
+      offset += local.length + f.data.length;
+    });
+    const cd = cat(...central);
+    return new Blob([...parts, cd, cat(u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length), u32(cd.length), u32(offset), u16(0))], { type: 'application/zip' });
+  }
+  // the static website only: what Firebase Hosting serves (no server scripts, no saved data)
+  const SITE = ['index.html', 'control.html', 'overlay.html', 'preview.html', 'assets.html', 'backup.html', 'firebase.json', 'deploy-to-firebase.bat',
+    'css/overlay.css', 'css/control.css', 'js/core.js', 'js/scenes.js', 'js/overlay.js', 'js/control.js'];
+  async function buildSite() {
+    const when = new Date(), root = 'esports-overlay-website/', files = [];
+    for (const f of SITE) {
+      try { const r = await fetch(f, { cache: 'no-store' }); if (!r.ok) throw new Error(r.status); const b = new Uint8Array(await r.arrayBuffer()); files.push({ name: root + f, data: b }); log('✓ ' + f + '  (' + (b.length / 1024).toFixed(1) + ' KB)', 'ok'); }
+      catch (e) { log('✗ ' + f + ' — ' + e.message, 'bad'); }
+    }
+    files.push({ name: root + 'PUBLISH.txt', data: new TextEncoder().encode('ESPORTS OVERLAY - website ready to publish (Firebase Hosting)\r\nBuilt ' + when.toString() + '\r\n\r\n1. Install Node.js LTS (nodejs.org) once.\r\n2. Create a Firebase project called "Esports Overlay" at console.firebase.google.com (note its project ID, e.g. esports-overlay).\r\n3. Double-click deploy-to-firebase.bat in this folder, enter the project ID and sign in.\r\n4. Your site: https://<project-id>.web.app\r\n\r\nThe site is a demo + the vMix asset exporter. The live setup (sync server, NDI relay, vMix control) runs on the vMix PC from the full project backup.\r\n') });
+    return { blob: makeZip(files, when), n: files.length, when };
+  }
+  async function build() {
+    const when = new Date(), root = 'esports-overlay-backup/', files = [];
+    for (const f of FILES) {
+      try { const r = await fetch(f, { cache: 'no-store' }); if (!r.ok) throw new Error(r.status); const b = new Uint8Array(await r.arrayBuffer()); files.push({ name: root + f, data: b }); log('✓ ' + f + '  (' + (b.length / 1024).toFixed(1) + ' KB)', 'ok'); }
+      catch (e) { log('✗ ' + f + ' — ' + e.message, 'bad'); }
+    }
+    try {   // your saved settings (teams, logos, colours, scores, cam assignments)
+      const r = await fetch('/api/state', { cache: 'no-store' }); const w = await r.json();
+      if (w && w.state) { const b = new TextEncoder().encode(JSON.stringify(w.state)); files.push({ name: root + 'data/state.json', data: b }); log('✓ data/state.json  (your saved settings, ' + (b.length / 1024).toFixed(1) + ' KB)', 'ok'); }
+    } catch (e) { log('– settings not included (open this page through start-server.bat to include them)'); }
+    files.push({ name: root + 'RESTORE.txt', data: new TextEncoder().encode('Backup made ' + when.toString() + '\r\n\r\nTo restore: unzip, open the esports-overlay-backup folder and double-click start-server.bat.\r\nYour saved teams / logos / colours are in data\\state.json and are loaded automatically.\r\n') });
+    return { blob: makeZip(files, when), n: files.length, when };
+  }
+  async function run() {
+    $('go').disabled = true; $('log').textContent = '';
+    const { blob, n, when } = await build();
+    const p = (v) => String(v).padStart(2, '0'), name = 'esports-overlay-backup-' + when.getFullYear() + '-' + p(when.getMonth() + 1) + '-' + p(when.getDate()) + '_' + p(when.getHours()) + p(when.getMinutes()) + '.zip';
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+    log('\nDone: ' + name + ' — ' + n + ' files, ' + (blob.size / 1024).toFixed(0) + ' KB. Check your Downloads folder.', 'ok'); $('go').disabled = false;
+  }
+  async function runSite() {
+    $('site').disabled = true; $('log').textContent = '';
+    const { blob, n, when } = await buildSite();
+    const p = (v) => String(v).padStart(2, '0'), name = 'esports-overlay-website-' + when.getFullYear() + '-' + p(when.getMonth() + 1) + '-' + p(when.getDate()) + '.zip';
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+    log('\nDone: ' + name + ' — ' + n + ' files, ' + (blob.size / 1024).toFixed(0) + ' KB. Check your Downloads folder.', 'ok'); $('site').disabled = false;
+  }
+  window.__buildBackup = build; window.__buildSite = buildSite;
+  $('go').onclick = run; $('site').onclick = runSite;
+})();
+</script>
+</body>
+</html>

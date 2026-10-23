@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Esports Overlay</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Animated broadcast overlays for CoD MW4 (4v4) and FC 27 (1v1) — vMix ready.">
+<style>
+  :root { --bg: #0b0e14; --card: #141a24; --line: #263044; --text: #eaf0fa; --muted: #8fa0ba; --acc: #ffb21a; --acc2: #00f08c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: radial-gradient(1200px 600px at 15% -10%, rgba(255,178,26,.14), transparent 60%), radial-gradient(1000px 600px at 95% 10%, rgba(0,240,140,.1), transparent 60%), var(--bg); color: var(--text); font: 16px/1.55 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 56px 22px 80px; }
+  .tag { display: inline-block; padding: 4px 14px; border: 1px solid var(--line); border-radius: 99px; color: var(--acc); letter-spacing: 4px; font-size: 12px; font-weight: 700; }
+  h1 { font-size: clamp(44px, 9vw, 92px); line-height: .95; margin: 18px 0 10px; letter-spacing: 3px; text-transform: uppercase; }
+  h1 span { background: linear-gradient(100deg, var(--acc), var(--acc2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  p.lead { font-size: 19px; color: var(--muted); max-width: 720px; margin: 0 0 30px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin: 26px 0; }
+  a.card { display: block; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 18px 16px; color: inherit; text-decoration: none; transition: transform .15s, border-color .15s; }
+  a.card:hover { transform: translateY(-3px); border-color: var(--acc); }
+  a.card b { display: block; font-size: 17px; margin-bottom: 4px; } a.card small { color: var(--muted); font-size: 14px; } a.card i { font-style: normal; color: var(--acc); font-weight: 700; font-size: 12px; letter-spacing: 2px; display: block; margin-bottom: 8px; }
+  h2 { margin: 40px 0 10px; font-size: 13px; letter-spacing: 4px; color: var(--muted); text-transform: uppercase; }
+  ul { padding-left: 20px; color: var(--muted); } li { margin: 6px 0; } li b { color: var(--text); }
+  .note { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--acc); border-radius: 10px; padding: 14px 18px; color: var(--muted); }
+  code { background: #0d121b; padding: 2px 7px; border-radius: 5px; font-size: 14px; color: var(--text); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <span class="tag">CoD MW4 · FC 27 · vMix</span>
+  <h1>Esports <span>Overlay</span></h1>
+  <p class="lead">Animated, broadcast-ready overlays for tournaments: scorebug, face cams, tactical &amp; technical timeouts, breaks, results, champions &amp; podium — one control panel, one vMix input.</p>
+
+  <div class="grid">
+    <a class="card" href="control.html"><i>TRY IT</i><b>Control panel (demo)</b><small>Click scenes, change scores and colours. Open the preview in another tab to watch it react.</small></a>
+    <a class="card" href="preview.html"><i>SEE IT</i><b>Preview every scene</b><small>All overlays for CoD and FC on a transparent checkerboard, with a live layout view.</small></a>
+    <a class="card" href="assets.html"><i>DOWNLOAD</i><b>vMix assets (PNG + MP4)</b><small>Transparent borders, backgrounds, plates and animated MP4 loops. Works fully here.</small></a>
+  </div>
+
+  <h2>What you get</h2>
+  <ul>
+    <li><b>Two themes</b> — angular tactical look for CoD, glass/neon for FC. Change every colour from the panel, globally or per overlay.</li>
+    <li><b>Face cams</b> — 8 player cams (CoD) or 2 (FC) with frames and name plates; hotkeys focus one cam and glide it to the bottom centre.</li>
+    <li><b>Casters &amp; stage cams</b> — desk shot and corner window; pick cams straight from your NDI network.</li>
+    <li><b>Light on vMix</b> — a single browser input shows every scene and only builds what is on screen.</li>
+  </ul>
+
+  <h2>About this website</h2>
+  <p class="note">This page hosts the <b>demo and the asset exporter</b>. The live production setup runs on the vMix PC (<code>start-server.bat</code>): it keeps the control panel and vMix in sync, reads NDI cams and lets other PCs control the show. Those parts cannot run on a web host, so in the demo the panel and overlay tabs sync inside your own browser only.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,4 @@
+Backup made Fri Oct 23 2026 18:40:12 GMT+0300 (Arabian Standard Time)
+
+To restore: unzip, open the esports-overlay-backup folder and double-click start-server.bat.
+Your saved teams / logos / colours are in data\state.json and are loaded automatically.

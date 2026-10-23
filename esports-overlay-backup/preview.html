@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Overlay Preview</title>
+<style>
+  body { margin: 0; background: #0d1016; color: #e8edf6; font: 14px 'Segoe UI', sans-serif; }
+  header { display: flex; gap: 10px; align-items: center; padding: 12px 20px; background: #0a0d12; border-bottom: 1px solid #263044; position: sticky; top: 0; z-index: 5; }
+  header b { letter-spacing: 3px; margin-right: 14px; }
+  button { padding: 7px 18px; background: #1b2230; color: #8392ab; border: 1px solid #263044; border-radius: 6px; font-weight: 700; cursor: pointer; }
+  button.on { background: #ffb21a; color: #000; border-color: #ffb21a; }
+  main { display: grid; grid-template-columns: repeat(auto-fill, minmax(620px, 1fr)); gap: 18px; padding: 20px; }
+  figure { margin: 0; } figcaption { padding: 6px 2px; font-weight: 700; letter-spacing: 1px; display: flex; justify-content: space-between; } figcaption small { color: #8392ab; font-weight: 400; }
+  .frame { position: relative; aspect-ratio: 16 / 9; border: 1px solid #263044; overflow: hidden;
+    background: repeating-conic-gradient(#2a3040 0 25%, #1c2230 0 50%) 0 0 / 28px 28px; }
+  .frame.game { background: linear-gradient(135deg, #3b4a2f, #1d2a3a 55%, #3a2a2a); }
+  iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; }
+  .ph { position: absolute; display: grid; place-items: center; color: rgba(255,255,255,.55); font-weight: 800; letter-spacing: 3px; font-size: 11px; box-sizing: border-box; }
+  .ph.gp { background: linear-gradient(135deg, #34503a, #1d3550 60%, #4a3a30); font-size: 22px; }
+  .ph.cam { background: linear-gradient(160deg, #4a4f5a, #2b2f38); border: 1px solid #111; }
+  select { background: #0e121a; color: #e8edf6; border: 1px solid #263044; padding: 3px 6px; }
+</style>
+</head>
+<body>
+<header><b>PREVIEW</b><button id="b-cod">CoD MW4</button><button id="b-fc">FC 27</button><button id="b-bg">Fake gameplay behind</button>
+  <span style="margin-left:auto;color:#8392ab">Every scene is forced ON here. Edit teams in the control panel — this page updates live.</span></header>
+<main id="m"></main>
+<script src="js/core.js"></script>
+<script>
+  const q = new URLSearchParams(location.search);
+  let game = q.get('game') === 'fc' ? 'fc' : 'cod', fake = true;
+  let topScene = q.get('top') || 'none';
+  function composite(m) {
+    const pc = (v, t) => (v / t * 100) + '%';
+    const box = (r, label, cls) => '<div class="ph ' + cls + '" style="left:' + pc(r.x, 1920) + ';top:' + pc(r.y, 1080) + ';width:' + pc(r.w, 1920) + ';height:' + pc(r.h, 1080) + '"><span>' + label + '</span></div>';
+    let h = box(Core.GAME_RECT, 'FULL-SCREEN GAMEPLAY 1920x1080', 'gp');
+    Core.camsFor(game, Core.Store.state[game]).forEach((c) => { h += box(c, 'FACE CAM', 'cam'); });
+    h += '<iframe src="overlay.html?game=' + game + '&scene=hud&force=1"></iframe>';
+    if (topScene !== 'none') h += '<iframe src="overlay.html?game=' + game + '&scene=' + topScene + '&force=1"></iframe>';
+    const f = document.createElement('figure'); f.style.gridColumn = '1 / -1';
+    const opts = ['none'].concat(Core.SCENES[game].filter((s) => s.id !== 'bg' && s.id !== 'hud').map((s) => s.id));
+    f.innerHTML = '<figcaption><span>LIVE LAYOUT (full-screen gameplay + cams + HUD + overlay on top)</span><small>Overlay on top: <select id="topsel">' + opts.map((o) => '<option' + (o === topScene ? ' selected' : '') + '>' + o + '</option>').join('') + '</select></small></figcaption><div class="frame" style="max-width:1280px">' + h + '</div>';
+    m.append(f);
+    f.querySelector('#topsel').onchange = (e) => { topScene = e.target.value; draw(); };
+  }
+  function draw() {
+    document.getElementById('b-cod').classList.toggle('on', game === 'cod');
+    document.getElementById('b-fc').classList.toggle('on', game === 'fc');
+    document.getElementById('b-bg').classList.toggle('on', fake);
+    const m = document.getElementById('m'); m.innerHTML = '';
+    composite(m);
+    Core.SCENES[game].forEach((s) => {
+      const f = document.createElement('figure');
+      const url = 'overlay.html?game=' + game + '&scene=' + s.id + '&force=1';
+      f.innerHTML = '<figcaption><span>' + s.label + '</span><small>' + (s.type === 'base' ? 'opaque base layer' : 'transparent overlay') + ' · <a style="color:#ffb21a" target="_blank" href="' + url + '">open</a></small></figcaption>' +
+        '<div class="frame' + (fake && s.type !== 'base' && s.type !== 'full' ? ' game' : '') + '"><iframe loading="lazy" src="' + url + '"></iframe></div>';
+      m.append(f);
+    });
+  }
+  document.getElementById('b-cod').onclick = () => { game = 'cod'; draw(); };
+  document.getElementById('b-fc').onclick = () => { game = 'fc'; draw(); };
+  document.getElementById('b-bg').onclick = () => { fake = !fake; draw(); };
+  Core.Store.init().then(draw);
+</script>
+</body>
+</html>

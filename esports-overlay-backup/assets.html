@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>vMix Asset Export</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { --bg: #0d1016; --card: #151a23; --line: #263044; --text: #e8edf6; --muted: #8392ab; --acc: #ffb21a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 'Segoe UI', system-ui, sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 12px 20px; background: #0a0d12; border-bottom: 1px solid var(--line); }
+  header b { letter-spacing: 3px; }
+  button, .btn { background: #1b2230; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px 14px; font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; }
+  button.acc { background: var(--acc); color: #0b0b0b; border-color: var(--acc); } button:hover { border-color: var(--acc); }
+  .opts { display: flex; gap: 12px; flex-wrap: wrap; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--card); align-items: end; }
+  label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; }
+  input[type=color] { width: 54px; height: 32px; padding: 2px; background: #0e121a; border: 1px solid var(--line); border-radius: 6px; } select { background: #0e121a; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px; }
+  main { padding: 16px 20px 60px; } h2 { margin: 26px 0 6px; font-size: 13px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; }
+  .note { color: var(--muted); margin: 0 0 12px; font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+  .thumb { background: repeating-conic-gradient(#2a3040 0 25%, #1c2230 0 50%) 0 0 / 20px 20px; border-radius: 6px; padding: 6px; display: grid; place-items: center; min-height: 80px; overflow: hidden; }
+  .thumb canvas, .thumb img { max-width: 100%; max-height: 200px; height: auto; }
+  .meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; } .meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .meta small { color: var(--muted); }
+  #status { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <b>vMIX ASSET EXPORT</b>
+  <button class="acc" id="zipBtn">⬇ Download everything (ZIP)</button>
+  <button id="animBtn">🎞 Animated MP4s (ZIP)</button>
+  <span id="status">Preparing…</span>
+  <a class="btn" href="control.html" style="margin-left:auto">← Control panel</a>
+</header>
+<div class="opts">
+  <label>Game<select id="game"><option value="cod">CoD MW4 (angular)</option><option value="fc">FC 27 (rounded)</option></select></label>
+  <label>Accent<input type="color" id="accent"></label>
+  <label>Accent 2<input type="color" id="accent2"></label>
+  <label>Background<input type="color" id="bg"></label>
+  <label>Panels<input type="color" id="panel"></label>
+  <label>Team / Player A<input type="color" id="teamA"></label>
+  <label>Team / Player B<input type="color" id="teamB"></label>
+  <button id="reset">Use my current colours</button>
+</div>
+<main>
+  <p class="note">Every graphic is a transparent PNG at its exact size, drawn with the colours above (they start from your control-panel theme and team colours). Use them in vMix as <b>Image inputs / layers</b> or as picture elements of a GT title. Cam frames have a few pixels of padding around the camera size so the glowing corners are not clipped.</p>
+  <div id="sections"></div>
+</main>
+<script src="js/core.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const hex2 = (h, a) => { const n = parseInt(h.slice(1), 16); return 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')'; };
+  const lighten = (h, k) => { const n = parseInt(h.slice(1), 16), c = [n >> 16, (n >> 8) & 255, n & 255].map((v) => Math.round(v + (255 - v) * k)); return '#' + c.map((v) => v.toString(16).padStart(2, '0')).join(''); };
+
+  /* ---------- drawing helpers ---------- */
+  function path(ctx, pts) { ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath(); }
+  function rrect(ctx, x, y, w, h, r) { // r = [tl,tr,br,bl]
+    ctx.beginPath(); ctx.moveTo(x + r[0], y); ctx.lineTo(x + w - r[1], y); ctx.arcTo(x + w, y, x + w, y + r[1], r[1]);
+    ctx.lineTo(x + w, y + h - r[2]); ctx.arcTo(x + w, y + h, x + w - r[2], y + h, r[2]); ctx.lineTo(x + r[3], y + h); ctx.arcTo(x, y + h, x, y + h - r[3], r[3]);
+    ctx.lineTo(x, y + r[0]); ctx.arcTo(x, y, x + r[0], y, r[0]); ctx.closePath();
+  }
+  function lin(ctx, x0, y0, x1, y1, stops) { const g = ctx.createLinearGradient(x0, y0, x1, y1); stops.forEach((s) => g.addColorStop(s[0], s[1])); return g; }
+
+  /* ---------- the assets ---------- */
+  function backgroundMain(o, clean) {
+    return (ctx, W, H) => {
+      const L = 1672, vx = Math.sin(160 * Math.PI / 180), vy = -Math.cos(160 * Math.PI / 180);
+      ctx.fillStyle = lin(ctx, W / 2 - vx * L / 2, H / 2 - vy * L / 2, W / 2 + vx * L / 2, H / 2 + vy * L / 2, [[0, o.bg2], [0.62, o.bg]]); ctx.fillRect(0, 0, W, H);
+      if (!clean) {
+        [[170, 430, o.teamA], [1750, 790, o.teamB]].forEach(([x, y, c]) => { const g = ctx.createRadialGradient(x, y, 0, x, y, 620); g.addColorStop(0, hex2(c, .34)); g.addColorStop(.68, hex2(c, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); });
+        const gc = document.createElement('canvas'); gc.width = W; gc.height = H; const g2 = gc.getContext('2d');
+        g2.strokeStyle = hex2(o.accent, .1); g2.lineWidth = 1; g2.beginPath();
+        for (let x = 0; x <= W; x += 60) { g2.moveTo(x + .5, 0); g2.lineTo(x + .5, H); } for (let y = 0; y <= H; y += 60) { g2.moveTo(0, y + .5); g2.lineTo(W, y + .5); } g2.stroke();
+        g2.globalCompositeOperation = 'destination-in'; const m = g2.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.hypot(W, H) / 2 * .78); m.addColorStop(.3, 'rgba(0,0,0,1)'); m.addColorStop(1, 'rgba(0,0,0,0)'); g2.fillStyle = m; g2.fillRect(0, 0, W, H);
+        ctx.drawImage(gc, 0, 0);
+      }
+      const v = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * .4, W / 2, H / 2, Math.hypot(W, H) / 2); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,.7)'); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+    };
+  }
+  function camFrame(w, h, color, len, th, pad) {
+    return (ctx) => {
+      ctx.translate(pad, pad);
+      ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 1; ctx.strokeRect(.5, .5, w - 1, h - 1);
+      ctx.strokeStyle = color; ctx.lineWidth = th; ctx.shadowColor = color; ctx.shadowBlur = th * 3; ctx.lineCap = 'butt';
+      ctx.beginPath();
+      ctx.moveTo(0, len); ctx.lineTo(0, 0); ctx.lineTo(len, 0);
+      ctx.moveTo(w - len, 0); ctx.lineTo(w, 0); ctx.lineTo(w, len);
+      ctx.moveTo(0, h - len); ctx.lineTo(0, h); ctx.lineTo(len, h);
+      ctx.moveTo(w - len, h); ctx.lineTo(w, h); ctx.lineTo(w, h - len);
+      ctx.stroke();
+    };
+  }
+  function plate(w, h, color, side, numW) {
+    return (ctx) => {
+      ctx.fillStyle = side === 'l' ? lin(ctx, 0, 0, w, 0, [[0, 'rgba(0,0,0,.86)'], [1, 'rgba(0,0,0,.6)']]) : lin(ctx, w, 0, 0, 0, [[0, 'rgba(0,0,0,.86)'], [1, 'rgba(0,0,0,.6)']]);
+      ctx.fillRect(0, 0, w, h); ctx.fillStyle = color;
+      if (side === 'l') { ctx.fillRect(0, 0, 4 + (h > 40 ? 2 : 0), h); ctx.fillRect(4, 0, numW, h); } else { ctx.fillRect(w - 4 - (h > 40 ? 2 : 0), 0, 4 + (h > 40 ? 2 : 0), h); ctx.fillRect(w - 4 - numW, 0, numW, h); }
+    };
+  }
+  function scorebug(o) {
+    const cod = o.game === 'cod', cut = 28;
+    return (ctx, W, H) => {
+      const side = 527, mid = 270, gap = (W - 2 * side - mid) / 2;
+      const panel = (x, left, color) => {
+        ctx.save(); ctx.translate(x, 0);
+        if (cod) path(ctx, left ? [[0, 0], [side, 0], [side, H], [cut, H], [0, H - cut]] : [[0, 0], [side, 0], [side, H - cut], [side - cut, H], [0, H]]); else rrect(ctx, 0, 0, side, H, left ? [20, 0, 0, 20] : [0, 20, 20, 0]);
+        ctx.fillStyle = left ? lin(ctx, 0, 0, side, 0, [[0, o.panel], [1, o.panel2]]) : lin(ctx, side, 0, 0, 0, [[0, o.panel], [1, o.panel2]]); ctx.fill(); ctx.clip();
+        ctx.fillStyle = color; ctx.fillRect(left ? 0 : side - 7, 0, 7, H);        // team stripe
+        ctx.fillRect(left ? side - 96 : 0, 0, 96, H);                              // score box
+        ctx.restore();
+      };
+      panel(0, true, o.teamA); panel(W - side, false, o.teamB);
+      ctx.save(); ctx.translate((W - mid) / 2, 0);
+      if (cod) path(ctx, [[0, 0], [mid, 0], [mid - 20, H], [20, H]]); else rrect(ctx, 0, 0, mid, H, [18, 18, 18, 18]);
+      ctx.fillStyle = lin(ctx, 0, 0, 0, H, [[0, o.accent], [1, o.accent2]]); ctx.fill(); ctx.restore();
+    };
+  }
+  function bottomBar(o) {
+    return (ctx, W, H) => {
+      ctx.fillStyle = lin(ctx, 0, H, 0, 0, [[0, 'rgba(0,0,0,.88)'], [1, 'rgba(0,0,0,.7)']]); ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = lin(ctx, 0, 0, W, 0, [[0, o.accent], [.3, hex2(o.accent, 0)], [.7, hex2(o.accent2, 0)], [1, o.accent2]]); ctx.fillRect(0, 0, W, 3);
+    };
+  }
+  function strip(o) {
+    return (ctx, W, H) => {
+      if (o.game === 'cod') path(ctx, [[10, 0], [W, 0], [W, H - 10], [W - 10, H], [0, H], [0, 10]]); else rrect(ctx, 0, 0, W, H, [18, 18, 18, 18]);
+      ctx.fillStyle = o.panel; ctx.fill(); ctx.strokeStyle = hex2(o.accent, .4); ctx.lineWidth = 2; ctx.stroke();
+    };
+  }
+  function lowerThird(o) {
+    return (ctx, W, H) => {
+      if (o.game === 'cod') path(ctx, [[0, 0], [W, 0], [W, H - 28], [W - 28, H], [0, H]]); else rrect(ctx, 0, 0, W, H, [0, 18, 18, 0]);
+      ctx.fillStyle = lin(ctx, 0, 0, W, 0, [[0, o.panel], [1, o.panel2]]); ctx.fill(); ctx.save(); ctx.clip();
+      ctx.fillStyle = lin(ctx, 0, 0, 0, H, [[0, o.accent], [1, o.accent2]]); ctx.fillRect(0, 0, 10, H); ctx.restore();
+    };
+  }
+  function banner(o, color) {
+    return (ctx, W, H) => {
+      if (o.game === 'cod') path(ctx, [[40, 0], [W, 0], [W - 40, H], [0, H]]); else rrect(ctx, 0, 0, W, H, [24, 24, 24, 24]);
+      ctx.fillStyle = o.bg; ctx.fill(); ctx.save(); ctx.clip();
+      ctx.fillStyle = lin(ctx, 0, 0, 330, 0, [[0, hex2(color, .55)], [1, hex2(color, 0)]]); ctx.fillRect(0, 0, 330, H);
+      ctx.fillStyle = color; ctx.fillRect(326, 0, 3, H); ctx.restore();
+    };
+  }
+  function panelBox(o, w, h, topColor) {
+    return (ctx) => {
+      if (o.game === 'cod') path(ctx, [[16, 0], [w, 0], [w, h - 16], [w - 16, h], [0, h], [0, 16]]); else rrect(ctx, 0, 0, w, h, [18, 18, 18, 18]);
+      ctx.fillStyle = lin(ctx, 0, 0, 0, h, [[0, o.panel2], [1, o.panel]]); ctx.fill(); ctx.save(); ctx.clip();
+      ctx.fillStyle = topColor; ctx.fillRect(0, 0, w, 5); ctx.restore(); ctx.strokeStyle = hex2(o.accent, .4); ctx.lineWidth = 1.5; if (o.game === 'cod') { path(ctx, [[16, 0], [w, 0], [w, h - 16], [w - 16, h], [0, h], [0, 16]]); } else rrect(ctx, 0, 0, w, h, [18, 18, 18, 18]); ctx.stroke();
+    };
+  }
+  function progressTrack(o) {
+    return (ctx, W, H) => { rrect(ctx, 0, 0, W, H, [H / 2, H / 2, H / 2, H / 2]); ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fill(); };
+  }
+  function progressFill(o) {
+    return (ctx, W, H) => { rrect(ctx, 0, 0, W, H, [H / 2, H / 2, H / 2, H / 2]); ctx.fillStyle = lin(ctx, 0, 0, W, 0, [[0, o.accent], [1, o.accent2]]); ctx.fill(); };
+  }
+
+  function buildList(o) {
+    const L = [], g = o.game, cod = g === 'cod';
+    L.push({ dir: 'backgrounds', name: 'background_' + g + '_main.png', w: 1920, h: 1080, draw: backgroundMain(o, false), note: 'Full-screen animated-look background (static)' });
+    L.push({ dir: 'backgrounds', name: 'background_' + g + '_clean.png', w: 1920, h: 1080, draw: backgroundMain(o, true), note: 'Plain gradient + vignette' });
+    const cams = cod ? [[288, 162], [374, 211]] : [[400, 225], [520, 293]];
+    const cols = [['teamA', o.teamA], ['teamB', o.teamB], ['accent', o.accent], ['white', '#ffffff']];
+    cams.forEach(([w, h]) => cols.forEach(([cn, c]) => L.push({ dir: 'player-cam-frames', name: 'cam_frame_' + w + 'x' + h + '_' + cn + '.png', w: w + 12, h: h + 12, draw: camFrame(w, h, c, 22, 3, 6), note: 'Place at cam position −6px (frame ' + w + '×' + h + ' + 6px padding)' })));
+    const pw = cams[0][0], pw2 = cams[1][0];
+    [[pw, 'A', o.teamA, 'l'], [pw, 'B', o.teamB, 'r'], [pw2, 'A', o.teamA, 'l'], [pw2, 'B', o.teamB, 'r']].forEach(([w, t, c, s]) => L.push({ dir: 'name-plates', name: 'nameplate_' + w + 'x28_team' + t + '_' + (s === 'l' ? 'left' : 'right') + '.png', w, h: 28, draw: plate(w, 28, c, s, 28), note: 'Empty player plate (add the name in a vMix title)' }));
+    [[1152, 648], [790, 444], [560, 315], [320, 180]].forEach(([w, h]) => L.push({ dir: 'desk-caster-frames', name: 'desk_frame_' + w + 'x' + h + '.png', w: w + 24, h: h + 24, draw: camFrame(w, h, o.accent, 46, 6, 12), note: 'Caster / desk cam frame (+12px padding)' }));
+    [[1152, 'l'], [790, 'l'], [790, 'r'], [560, 'l'], [560, 'r']].forEach(([w, s]) => L.push({ dir: 'desk-caster-frames', name: 'desk_nameplate_' + w + 'x66_' + (s === 'l' ? 'left' : 'right') + '.png', w, h: 66, draw: plate(w, 66, o.accent, s, 56), note: 'Empty caster plate (name + role go on top)' }));
+    L.push({ dir: 'desk-caster-frames', name: 'desk_nameplate_320x34_pip.png', w: 320, h: 34, draw: plate(320, 34, o.accent, 'l', 34), note: 'Corner window plate' });
+    L.push({ dir: 'bars-and-panels', name: 'scorebug_' + g + '_base.png', w: 1320, h: 100, draw: scorebug(o), note: 'Empty scorebug (team stripes + score boxes + centre block)' });
+    L.push({ dir: 'bars-and-panels', name: 'bottom_bar_1920x76.png', w: 1920, h: 76, draw: bottomBar(o), note: 'Bottom ticker bar' });
+    L.push({ dir: 'bars-and-panels', name: 'info_strip_640x36.png', w: 640, h: 36, draw: strip(o), note: 'Pill under the scorebug' });
+    L.push({ dir: 'bars-and-panels', name: 'lower_third_700x96.png', w: 700, h: 96, draw: lowerThird(o), note: 'Lower third bar' });
+    L.push({ dir: 'bars-and-panels', name: 'banner_teamA_1280x170.png', w: 1280, h: 170, draw: banner(o, o.teamA), note: 'Map win / goal banner (team A)' });
+    L.push({ dir: 'bars-and-panels', name: 'banner_teamB_1280x170.png', w: 1280, h: 170, draw: banner(o, o.teamB), note: 'Map win / goal banner (team B)' });
+    L.push({ dir: 'bars-and-panels', name: 'panel_teamA_880x170.png', w: 880, h: 170, draw: panelBox(o, 880, 170, o.teamA), note: 'Timeout / info panel (team A top line)' });
+    L.push({ dir: 'bars-and-panels', name: 'panel_teamB_880x170.png', w: 880, h: 170, draw: panelBox(o, 880, 170, o.teamB), note: 'Timeout / info panel (team B top line)' });
+    L.push({ dir: 'bars-and-panels', name: 'progress_track_760x8.png', w: 760, h: 8, draw: progressTrack(o), note: 'Countdown bar background' });
+    L.push({ dir: 'bars-and-panels', name: 'progress_fill_760x8.png', w: 760, h: 8, draw: progressFill(o), note: 'Countdown bar fill (crop it as time runs out)' });
+    return L;
+  }
+
+  /* ================= ANIMATED ASSETS (MP4, seamless loops) =================
+     drawFrame(ctx, p, W, H): p is the loop phase 0..1 (frame N == frame 0). MP4 has no alpha, so the
+     animated borders / celebration are rendered on BLACK: key the black out in vMix (Colour Key / Luma). */
+  const TAU = Math.PI * 2, rnd = (n, k) => { const x = Math.sin(n * 127.1 + k * 311.7) * 43758.5453; return x - Math.floor(x); };
+
+  function animBackground(o) {
+    let gc = null, mask = null;
+    return (ctx, p, W, H) => {
+      const L = 1672, vx = Math.sin(160 * Math.PI / 180), vy = -Math.cos(160 * Math.PI / 180);
+      ctx.fillStyle = lin(ctx, W / 2 - vx * L / 2, H / 2 - vy * L / 2, W / 2 + vx * L / 2, H / 2 + vy * L / 2, [[0, o.bg2], [0.62, o.bg]]); ctx.fillRect(0, 0, W, H);
+      const e = .5 - .5 * Math.cos(TAU * p), e2 = .5 - .5 * Math.cos(TAU * (p + .5));
+      [[170 + 180 * e, 430 + 120 * e, 620 * (1 + .15 * e), o.teamA], [1750 - 180 * e2, 790 - 120 * e2, 620 * (1 + .15 * e2), o.teamB]].forEach(([x, y, r, c]) => { const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, hex2(c, .34)); g.addColorStop(.68, hex2(c, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); });
+      if (!gc) { gc = document.createElement('canvas'); gc.width = W; gc.height = H; mask = document.createElement('canvas'); mask.width = W; mask.height = H; const m = mask.getContext('2d'); const rg = m.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.hypot(W, H) / 2 * .78); rg.addColorStop(.3, 'rgba(0,0,0,1)'); rg.addColorStop(1, 'rgba(0,0,0,0)'); m.fillStyle = rg; m.fillRect(0, 0, W, H); }
+      const g2 = gc.getContext('2d'); g2.globalCompositeOperation = 'source-over'; g2.clearRect(0, 0, W, H); g2.strokeStyle = hex2(o.accent, .1); g2.lineWidth = 1; g2.beginPath();
+      const off = (p * 60) % 60; for (let x = -60 + off; x <= W; x += 60) { g2.moveTo(Math.round(x) + .5, 0); g2.lineTo(Math.round(x) + .5, H); } for (let y = -60 + off; y <= H; y += 60) { g2.moveTo(0, Math.round(y) + .5); g2.lineTo(W, Math.round(y) + .5); } g2.stroke();
+      g2.globalCompositeOperation = 'destination-in'; g2.drawImage(mask, 0, 0); ctx.drawImage(gc, 0, 0);
+      [[170, 0], [90, .33], [260, .66]].forEach(([bw, ph]) => {
+        const q = (p + ph) % 1, x = -400 + 2700 * q; ctx.save(); ctx.translate(x + bw / 2, -250 + 800); ctx.rotate(18 * Math.PI / 180);
+        const g = ctx.createLinearGradient(-bw / 2, 0, bw / 2, 0); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(.5, 'rgba(255,255,255,.055)'); g.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = g; ctx.fillRect(-bw / 2, -800, bw, 1600); ctx.restore();
+      });
+      const v = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * .4, W / 2, H / 2, Math.hypot(W, H) / 2); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,.7)'); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+    };
+  }
+
+  function animFrame(w, h, color, len, th, pad) {   // glowing corners that pulse + a light that runs along the top edge, on black
+    return (ctx, p, W, H) => {
+      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.save(); ctx.translate(pad, pad);
+      const pulse = .5 - .5 * Math.cos(TAU * p);
+      ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 1; ctx.strokeRect(.5, .5, w - 1, h - 1);
+      ctx.strokeStyle = color; ctx.lineWidth = th; ctx.shadowColor = color; ctx.shadowBlur = th * (2 + 3 * pulse);
+      ctx.beginPath(); ctx.moveTo(0, len); ctx.lineTo(0, 0); ctx.lineTo(len, 0); ctx.moveTo(w - len, 0); ctx.lineTo(w, 0); ctx.lineTo(w, len);
+      ctx.moveTo(0, h - len); ctx.lineTo(0, h); ctx.lineTo(len, h); ctx.moveTo(w - len, h); ctx.lineTo(w, h); ctx.lineTo(w, h - len); ctx.stroke();
+      ctx.shadowBlur = 0; const sw = w * .28, x = -sw + (w + sw) * p, g = ctx.createLinearGradient(x, 0, x + sw, 0); g.addColorStop(0, hex2(color, 0)); g.addColorStop(.5, color); g.addColorStop(1, hex2(color, 0));
+      ctx.save(); ctx.beginPath(); ctx.rect(0, -th, w, th * 2); ctx.clip(); ctx.fillStyle = g; ctx.fillRect(x, -th / 2, sw, th); ctx.restore(); ctx.restore();
+    };
+  }
+
+  function animCelebration(o) {
+    const bursts = [[340, 300, '#ffd24a', 0], [1580, 260, o.accent, .3], [960, 200, '#ffffff', .6], [520, 640, o.accent2, .15], [1400, 660, '#ffd24a', .45]];
+    const pal = ['#ffd24a', '#ffffff', o.accent, o.accent2, o.teamA];
+    return (ctx, p, W, H) => {
+      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+      [[380, 1], [1540, -1]].forEach(([ax, dir]) => { ctx.save(); ctx.translate(ax, -140); ctx.rotate(dir * 20 * Math.PI / 180 * Math.sin(TAU * p)); const g = ctx.createLinearGradient(0, 0, 0, 1400); g.addColorStop(0, 'rgba(255,236,170,.42)'); g.addColorStop(.78, 'rgba(255,236,170,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-31, 0); ctx.lineTo(31, 0); ctx.lineTo(260, 1400); ctx.lineTo(-260, 1400); ctx.closePath(); ctx.fill(); ctx.restore(); });
+      bursts.forEach(([x, y, c, d]) => {
+        const q = (p * 2 + d) % 1, a = q < .04 ? q / .04 : (q > .55 ? Math.max(0, 1 - (q - .55) / .45) : 1);
+        ctx.save(); ctx.translate(x, y); ctx.strokeStyle = c; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.globalAlpha = a;
+        for (let k = 0; k < 16; k++) { const ang = k * Math.PI / 8, r0 = 230 * q, r1 = r0 + 44 * (.1 + .9 * q); ctx.beginPath(); ctx.moveTo(Math.cos(ang) * r0, Math.sin(ang) * r0); ctx.lineTo(Math.cos(ang) * r1, Math.sin(ang) * r1); ctx.stroke(); }
+        if (q < .22) { const fa = .9 * (1 - q / .22), fr = 20 + 90 * (q / .22); const g = ctx.createRadialGradient(0, 0, 0, 0, 0, fr); g.addColorStop(0, hex2(c.length === 7 ? c : '#ffffff', fa)); g.addColorStop(1, hex2(c.length === 7 ? c : '#ffffff', 0)); ctx.globalAlpha = 1; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, fr, 0, TAU); ctx.fill(); }
+        ctx.restore();
+      });
+      for (let i = 0; i < 26; i++) {
+        const s = 14 + rnd(i, 3) * 26, a = Math.max(0, Math.sin(Math.PI * ((p * 2 + rnd(i, 4)) % 1))); if (a <= 0) continue;
+        ctx.save(); ctx.translate(20 + rnd(i, 1) * 1880, 20 + rnd(i, 2) * 1040); ctx.rotate((p * 2 + rnd(i, 4)) % 1 * Math.PI / 2); ctx.scale(.3 + .7 * a, .3 + .7 * a); ctx.globalAlpha = a; ctx.fillStyle = '#fff6d0';
+        ctx.beginPath(); [[0, -.5], [.12, -.12], [.5, 0], [.12, .12], [0, .5], [-.12, .12], [-.5, 0], [-.12, -.12]].forEach((pt, j) => (j ? ctx.lineTo(pt[0] * s, pt[1] * s) : ctx.moveTo(pt[0] * s, pt[1] * s))); ctx.closePath(); ctx.fill(); ctx.restore();
+      }
+      for (let i = 0; i < 70; i++) {
+        const k = [1, 2, 3][i % 3], ph = rnd(i, 8), y = ((p * k + ph) % 1) * (H + 160) - 80, x = rnd(i, 5) * 1900 + Math.sin(TAU * (p * k + ph)) * 60, wd = 9 + rnd(i, 9) * 12, shape = i % 3;
+        ctx.save(); ctx.translate(x, y); ctx.rotate(TAU * (p * k * 2 + rnd(i, 6))); ctx.fillStyle = pal[i % 5]; ctx.globalAlpha = .95;
+        if (shape === 1) { ctx.beginPath(); ctx.arc(0, 0, wd / 2, 0, TAU); ctx.fill(); } else if (shape === 2) ctx.fillRect(-wd * .225, -wd * 1.8, wd * .45, wd * 3.6); else ctx.fillRect(-wd / 2, -wd * .95, wd, wd * 1.9);
+        ctx.restore();
+      }
+    };
+  }
+
+  function animList(o) {
+    const L = [], g = o.game, cod = g === 'cod', even = (v) => v + (v % 2);
+    L.push({ dir: 'animated-backgrounds', name: 'background_' + g + '_animated_10s_loop.mp4', w: 1920, h: 1080, fps: 30, frames: 300, bitrate: 10e6, drawFrame: animBackground(o), note: 'Seamless 10 s loop: drifting glows, moving grid, light beams. Opaque.' });
+    const cams = cod ? [[288, 162], [374, 211]] : [[400, 225], [520, 293]];
+    [['teamA', o.teamA], ['teamB', o.teamB], ['accent', o.accent]].forEach(([cn, c]) => cams.forEach(([w, h]) => L.push({ dir: 'animated-cam-frames', name: 'cam_frame_' + w + 'x' + h + '_' + cn + '_animated_4s_loop.mp4', w: even(w + 12), h: even(h + 12), fps: 30, frames: 120, bitrate: 3e6, drawFrame: animFrame(w, h, c, 22, 3, 6), note: 'On BLACK — key black out in vMix. Pulsing corners + running light.' })));
+    [[1152, 648], [790, 444], [560, 315], [320, 180]].forEach(([w, h]) => L.push({ dir: 'animated-cam-frames', name: 'desk_frame_' + w + 'x' + h + '_animated_4s_loop.mp4', w: even(w + 24), h: even(h + 24), fps: 30, frames: 120, bitrate: 4e6, drawFrame: animFrame(w, h, o.accent, 46, 6, 12), note: 'Caster / desk frame on BLACK — key black out' }));
+    L.push({ dir: 'animated-celebration', name: 'celebration_fireworks_confetti_6s_loop.mp4', w: 1920, h: 1080, fps: 30, frames: 180, bitrate: 12e6, drawFrame: animCelebration(o), note: 'Spotlights, fireworks, sparkles, confetti on BLACK — key black out or use an Add/Screen blend.' });
+    return L;
+  }
+
+  /* ---------- MP4 muxer (H.264, one video track, faststart) ---------- */
+  function muxMp4(chunks, avcC, w, h, fps) {
+    const enc = new TextEncoder(), u8 = (...a) => new Uint8Array(a), u32 = (v) => u8(v >>> 24 & 255, v >>> 16 & 255, v >>> 8 & 255, v & 255), u16 = (v) => u8(v >> 8 & 255, v & 255), str = (s) => enc.encode(s);
+    const cat = (...a) => { const n = a.reduce((s, x) => s + x.length, 0), out = new Uint8Array(n); let p = 0; a.forEach((x) => { out.set(x, p); p += x.length; }); return out; };
+    const box = (t, ...pl) => { const p = cat(...pl); return cat(u32(8 + p.length), str(t), p); };
+    const full = (t, ver, flags, ...pl) => box(t, u8(ver, flags >> 16 & 255, flags >> 8 & 255, flags & 255), ...pl);
+    const zeros = (n) => new Uint8Array(n), TS = fps * 1000, n = chunks.length, DUR = n * 1000;
+    const matrix = cat(u32(0x10000), u32(0), u32(0), u32(0), u32(0x10000), u32(0), u32(0), u32(0), u32(0x40000000));
+    const ftyp = box('ftyp', str('isom'), u32(512), str('isom'), str('iso2'), str('avc1'), str('mp41'));
+    const keys = []; chunks.forEach((c, i) => { if (c.key) keys.push(i + 1); });
+    const avc1 = box('avc1', zeros(6), u16(1), zeros(16), u16(w), u16(h), u32(0x00480000), u32(0x00480000), u32(0), u16(1), zeros(32), u16(0x18), u16(0xffff), box('avcC', avcC));
+    const stbl = (off) => box('stbl', full('stsd', 0, 0, u32(1), avc1), full('stts', 0, 0, u32(1), u32(n), u32(1000)), full('stss', 0, 0, u32(keys.length), ...keys.map(u32)),
+      full('stsc', 0, 0, u32(1), u32(1), u32(n), u32(1)), full('stsz', 0, 0, u32(0), u32(n), ...chunks.map((c) => u32(c.d.length))), full('stco', 0, 0, u32(1), u32(off)));
+    const moov = (off) => box('moov',
+      full('mvhd', 0, 0, u32(0), u32(0), u32(TS), u32(DUR), u32(0x10000), u16(0x100), zeros(10), matrix, zeros(24), u32(2)),
+      box('trak', full('tkhd', 0, 3, u32(0), u32(0), u32(1), u32(0), u32(DUR), zeros(8), u16(0), u16(0), u16(0), u16(0), matrix, u32(w << 16), u32(h << 16)),
+        box('mdia', full('mdhd', 0, 0, u32(0), u32(0), u32(TS), u32(DUR), u16(0x55c4), u16(0)), full('hdlr', 0, 0, u32(0), str('vide'), zeros(12), str('VideoHandler\0')),
+          box('minf', full('vmhd', 0, 1, u16(0), zeros(6)), box('dinf', full('dref', 0, 0, u32(1), full('url ', 0, 1))), stbl(off)))));
+    const size0 = moov(0).length, offset = ftyp.length + size0 + 8;
+    const total = chunks.reduce((s, c) => s + c.d.length, 0);
+    return new Blob([ftyp, moov(offset), cat(u32(8 + total), str('mdat')), ...chunks.map((c) => c.d)], { type: 'video/mp4' });
+  }
+  // yields to the browser without setTimeout (timers are throttled to 1 s in background tabs)
+  const yieldNow = () => new Promise((r) => { const mc = new MessageChannel(); mc.port1.onmessage = () => { mc.port1.close(); r(); }; mc.port2.postMessage(0); });
+  async function encodeMp4(it, onProgress) {
+    const W = it.w + (it.w % 2), H = it.h + (it.h % 2), canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d'), chunks = []; let desc = null, err = null;
+    const enc = new VideoEncoder({ output: (c, m) => { if (!desc && m && m.decoderConfig && m.decoderConfig.description) desc = new Uint8Array(m.decoderConfig.description.slice ? m.decoderConfig.description.slice(0) : m.decoderConfig.description); const d = new Uint8Array(c.byteLength); c.copyTo(d); chunks.push({ d, key: c.type === 'key' }); }, error: (e) => { err = e; } });
+    enc.configure({ codec: 'avc1.640028', width: W, height: H, bitrate: it.bitrate, framerate: it.fps, avc: { format: 'avc' }, latencyMode: 'quality' });
+    for (let i = 0; i < it.frames; i++) {
+      if (err) throw err; it.drawFrame(ctx, i / it.frames, W, H);
+      const f = new VideoFrame(canvas, { timestamp: Math.round(i * 1e6 / it.fps), duration: Math.round(1e6 / it.fps) }); enc.encode(f, { keyFrame: i % it.fps === 0 }); f.close();
+      while (enc.encodeQueueSize > 6) await yieldNow();
+      if (i % 8 === 0) { if (onProgress) onProgress(i / it.frames); await yieldNow(); }
+    }
+    await enc.flush(); enc.close(); if (err) throw err; if (!desc) throw new Error('encoder gave no avcC');
+    return muxMp4(chunks, desc, W, H, it.fps);
+  }
+  window.__encodeMp4 = encodeMp4; window.__animList = animList;
+
+  /* ---------- UI ---------- */
+  const state = { items: [], logos: [] };
+  function options() {
+    return { game: $('game').value, accent: $('accent').value, accent2: $('accent2').value, bg: $('bg').value, bg2: lighten($('bg').value, .07), panel: $('panel').value, panel2: lighten($('panel').value, .06), teamA: $('teamA').value, teamB: $('teamB').value };
+  }
+  function renderCanvas(it) {
+    const c = document.createElement('canvas'); c.width = it.w; c.height = it.h; const ctx = c.getContext('2d'); it.draw(ctx, it.w, it.h); return c;
+  }
+  function addCard(host, it, canvas) {
+    const card = document.createElement('div'); card.className = 'card';
+    const th = document.createElement('div'); th.className = 'thumb'; th.appendChild(canvas);
+    const meta = document.createElement('div'); meta.className = 'meta';
+    meta.innerHTML = '<span title="' + it.name + '"><b>' + it.name + '</b><br><small>' + it.w + '×' + it.h + (it.note ? ' · ' + it.note : '') + '</small></span>';
+    const b = document.createElement('button'); b.textContent = '⬇ PNG'; b.onclick = () => canvas.toBlob((bl) => save(bl, it.name.split('/').pop()), 'image/png'); meta.appendChild(b);
+    card.append(th, meta); host.appendChild(card);
+  }
+  function save(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
+
+  const TITLES = { 'backgrounds': ['Backgrounds', '1920×1080'], 'player-cam-frames': ['Player cam borders', 'Transparent centre — layer over the camera'], 'name-plates': ['Player name plates', 'Empty bars with number box + colour tag'], 'desk-caster-frames': ['Caster / desk cam borders & plates', ''], 'bars-and-panels': ['Bars, banners & panels', 'Scorebug, ticker, lower third, banners, timeout panel, countdown bar'], 'logos': ['Logos from your control panel', 'Event logo + team logos, as transparent PNG'] };
+  function build() {
+    const o = options(); state.items = buildList(o); const host = $('sections'); host.innerHTML = '';
+    const groups = {}; state.items.forEach((it) => { (groups[it.dir] = groups[it.dir] || []).push(it); });
+    Object.keys(groups).concat(state.logos.length ? ['logos'] : []).forEach((dir) => {
+      const sec = document.createElement('section'); const t = TITLES[dir] || [dir, ''];
+      sec.innerHTML = '<h2>' + t[0] + '</h2><p class="note">' + t[1] + '</p>'; const grid = document.createElement('div'); grid.className = 'grid'; sec.appendChild(grid); host.appendChild(sec);
+      if (dir === 'logos') state.logos.forEach((l) => addCard(grid, { name: 'logos/' + l.name, w: l.w, h: l.h }, l.canvas));
+      else groups[dir].forEach((it) => addCard(grid, it, renderCanvas(it)));
+    });
+    // animated section: live looping previews + MP4 export
+    state.anim = animList(o); state.previews = [];
+    const asec = document.createElement('section'); asec.innerHTML = '<h2>Animated (MP4, seamless loops)</h2><p class="note">H.264 MP4 at 30 fps. MP4 has no transparency: the background is opaque, the borders and celebration are on <b>black</b> — in vMix use <b>Colour Key</b> on black (or put the layer in Add/Screen blend) to see only the glow. Set the vMix input to <b>Loop</b>.</p>';
+    const ag = document.createElement('div'); ag.className = 'grid'; asec.appendChild(ag); host.appendChild(asec);
+    state.anim.forEach((it) => {
+      const sc = Math.min(1, 560 / it.w), pc = document.createElement('canvas'); pc.width = Math.max(2, Math.round(it.w * sc)); pc.height = Math.max(2, Math.round(it.h * sc));
+      const card = document.createElement('div'); card.className = 'card'; const th = document.createElement('div'); th.className = 'thumb'; th.style.background = '#000'; th.appendChild(pc);
+      const meta = document.createElement('div'); meta.className = 'meta'; meta.innerHTML = '<span title="' + it.name + '"><b>' + it.name + '</b><br><small>' + it.w + '×' + it.h + ' · ' + (it.frames / it.fps) + ' s · ' + it.note + '</small></span>';
+      const b = document.createElement('button'); b.textContent = '⬇ MP4'; b.onclick = async () => { b.disabled = true; try { const bl = await encodeMp4(it, (f) => { b.textContent = Math.round(f * 100) + '%'; }); save(bl, it.name); } catch (e) { alert('Could not encode: ' + e.message); } b.textContent = '⬇ MP4'; b.disabled = false; };
+      meta.appendChild(b); card.append(th, meta); ag.appendChild(card); state.previews.push({ it, pc, sc });
+    });
+    $('status').textContent = state.items.length + ' graphics + ' + state.anim.length + ' animated' + (state.logos.length ? ' + ' + state.logos.length + ' logos' : '') + ' ready';
+  }
+  setInterval(() => {   // keep the small previews moving
+    const t = performance.now() / 1000; (state.previews || []).forEach(({ it, pc, sc }) => { const c = pc.getContext('2d'); c.save(); c.scale(pc.width / (it.w + (it.w % 2)), pc.height / (it.h + (it.h % 2))); it.drawFrame(c, (t / (it.frames / it.fps)) % 1, it.w + (it.w % 2), it.h + (it.h % 2)); c.restore(); });
+  }, 66);
+  async function buildAnimZip(onProgress) {
+    const files = []; const list = state.anim;
+    for (let i = 0; i < list.length; i++) { const bl = await encodeMp4(list[i], (f) => onProgress && onProgress(i, list.length, f)); files.push({ name: list[i].dir + '/' + list[i].name, data: new Uint8Array(await bl.arrayBuffer()) }); }
+    files.push({ name: 'README.txt', data: new TextEncoder().encode('Animated vMix assets (H.264 MP4, 30 fps, seamless loops)\r\n\r\nMP4 has no transparency.\r\n- animated-backgrounds/: opaque full-screen loop. Add Input > Video, tick Loop, use as the bottom layer.\r\n- animated-cam-frames/ and animated-celebration/: drawn on BLACK. In vMix open the input > Colour Key, pick black (or place the layer with an Add / Screen blend) so only the glow stays. Set Loop.\r\n') });
+    return makeZip(files);
+  }
+  window.__buildAnimZip = buildAnimZip;
+
+  /* ---------- logos from the saved state ---------- */
+  function loadImg(src) { return new Promise((res) => { const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = () => res(im); im.onerror = () => res(null); im.src = src; }); }
+  async function collectLogos(st, game) {
+    const list = []; const add = async (name, src) => { if (!src) return; const im = await loadImg(src); if (!im) return; const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight; c.getContext('2d').drawImage(im, 0, 0); list.push({ name, w: c.width, h: c.height, canvas: c }); };
+    await add('event_logo.png', st.event.logo);
+    for (const gm of ['cod', 'fc']) for (let i = 0; i < 2; i++) await add((gm === 'cod' ? 'cod_team' : 'fc_player') + (i ? 'B' : 'A') + '_logo.png', st[gm].teams[i].logo);
+    for (const gm of ['cod', 'fc']) for (let i = 0; i < 3; i++) await add(gm + '_podium_' + (i + 1) + '_logo.png', st[gm].podium && st[gm].podium[i].logo);
+    return list;
+  }
+
+  /* ---------- minimal ZIP writer (no compression) ---------- */
+  const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  const crc32 = (b) => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+  function makeZip(files) {
+    const enc = new TextEncoder(), parts = [], central = []; let offset = 0;
+    const u16 = (v) => new Uint8Array([v & 255, v >> 8 & 255]), u32 = (v) => new Uint8Array([v & 255, v >> 8 & 255, v >> 16 & 255, v >>> 24 & 255]);
+    const cat = (...a) => { const n = a.reduce((s, x) => s + x.length, 0), out = new Uint8Array(n); let p = 0; a.forEach((x) => { out.set(x, p); p += x.length; }); return out; };
+    const time = 0, date = ((2026 - 1980) << 9) | (1 << 5) | 1;
+    files.forEach((f) => {
+      const nm = enc.encode(f.name), crc = crc32(f.data);
+      const local = cat(u32(0x04034b50), u16(20), u16(0x0800), u16(0), u16(time), u16(date), u32(crc), u32(f.data.length), u32(f.data.length), u16(nm.length), u16(0), nm);
+      parts.push(local, f.data);
+      central.push(cat(u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0), u16(time), u16(date), u32(crc), u32(f.data.length), u32(f.data.length), u16(nm.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset), nm));
+      offset += local.length + f.data.length;
+    });
+    const cd = cat(...central);
+    return new Blob([...parts, cd, cat(u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length), u32(cd.length), u32(offset), u16(0))], { type: 'application/zip' });
+  }
+  const toBytes = (canvas) => new Promise((res) => canvas.toBlob((b) => b.arrayBuffer().then((ab) => res(new Uint8Array(ab))), 'image/png'));
+  async function buildZip() {
+    const files = [];
+    for (const it of state.items) files.push({ name: it.dir + '/' + it.name, data: await toBytes(renderCanvas(it)) });
+    for (const l of state.logos) files.push({ name: 'logos/' + l.name, data: await toBytes(l.canvas) });
+    const o = options();
+    const readme = 'vMix assets (' + o.game.toUpperCase() + ')\r\n\r\nAll files are transparent PNGs at their exact pixel size (1920x1080 canvas).\r\n' +
+      '- backgrounds/        full-screen backgrounds: use as the bottom layer or an Image input\r\n- player-cam-frames/   borders with a transparent centre: layer over each camera, 6px bigger than the cam on every side\r\n' +
+      '  (CoD cams 288x162 at x=0 / x=1632, y=330+162*n; FC cams 400x225 at x=24,y=760 and x=1496,y=760)\r\n- name-plates/         empty player name bars: put them on the bottom 28px of each cam\r\n' +
+      '- desk-caster-frames/ borders + plates for casters (cam sizes 1152x648, 790x444, 560x315, 320x180)\r\n- bars-and-panels/     scorebug base, bottom bar, info strip, lower third, banners, panels, countdown bar\r\n- logos/               your saved logos as PNG\r\n\r\n' +
+      'In vMix: Add Input > Image (or drag the PNG in), then use Layers / Position to place it. Text is not baked in - add names/scores with GT titles on top.\r\n';
+    files.push({ name: 'README.txt', data: new TextEncoder().encode(readme) });
+    return makeZip(files);
+  }
+  window.__buildZip = buildZip;
+
+  $('zipBtn').onclick = async () => { $('status').textContent = 'Building ZIP…'; const z = await buildZip(); save(z, 'vmix-assets-' + $('game').value + '.zip'); $('status').textContent = 'ZIP downloaded (' + Math.round(z.size / 1024) + ' KB)'; };
+  $('animBtn').onclick = async () => {
+    if (typeof VideoEncoder === 'undefined') { alert('This browser cannot encode MP4 (needs a recent Chrome / Edge).'); return; }
+    $('animBtn').disabled = true;
+    try { const z = await buildAnimZip((i, n, f) => { $('status').textContent = 'Encoding MP4 ' + (i + 1) + '/' + n + ' — ' + Math.round(f * 100) + '%'; }); save(z, 'vmix-animated-mp4-' + $('game').value + '.zip'); $('status').textContent = 'Animated ZIP downloaded (' + (z.size / 1048576).toFixed(1) + ' MB)'; }
+    catch (e) { $('status').textContent = 'MP4 export failed: ' + e.message; alert('MP4 export failed: ' + e.message); }
+    $('animBtn').disabled = false;
+  };
+  $('game').onchange = () => { fillFromState(); };
+  ['accent', 'accent2', 'bg', 'panel', 'teamA', 'teamB'].forEach((id) => { $(id).oninput = () => { clearTimeout(window.__t); window.__t = setTimeout(build, 150); }; });
+  $('reset').onclick = () => fillFromState();
+
+  function fillFromState() {
+    const st = Core.Store.state, g = $('game').value, d = Core.THEME_DEFAULTS[g], e = st.event;
+    $('accent').value = e.themeAccent || d.accent; $('accent2').value = /^#[0-9a-f]{6}$/i.test(e.themeAccent2) ? e.themeAccent2 : (e.themeAccent ? e.themeAccent : d.accent2);
+    $('bg').value = e.themeBg || d.bg; $('panel').value = e.themePanel || d.panel;
+    $('teamA').value = st[g].teams[0].color; $('teamB').value = st[g].teams[1].color;
+    build();
+  }
+  Core.Store.init().then(async () => { $('game').value = Core.Store.state.ui.game; state.logos = await collectLogos(Core.Store.state, $('game').value); fillFromState(); });
+})();
+</script>
+</body>
+</html>
